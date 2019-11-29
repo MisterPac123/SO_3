@@ -122,7 +122,7 @@ int tfsDelete(char *filename){
 int tfsRename(char *filenameOld, char *filenameNew){
 	int tam_msg;
 	char msg[MAX_INPUT_SIZE] = "r ";
-	char delim[1] = " ";
+	char delim[2] = " ";
 
 	strcat(msg,filenameOld);
 	strcat(msg,delim);

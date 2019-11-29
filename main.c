@@ -3,6 +3,7 @@
 //adicionar /0 no final de mensagens do buffer
 //adicionar /0 no final de texto guardado 
 //por funcoes de tratamento de mensagens no fs
+//testar funcoes
 
 #define _GNU_SOURCE
 #include <stdio.h>
@@ -14,6 +15,8 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include<signal.h>
+
 #include "fs.h"
 #include "constants.h"
 #include "lib/timer.h"
@@ -26,7 +29,6 @@ char* socketname = NULL;
 char* global_outputFile = NULL;
 pthread_mutex_t p_command, c_command;
 pthread_t* workers;
-sem_t sem_p, sem_c;
 tecnicofs* fs;
 TIMER_T startTime, stopTime;
 
@@ -35,6 +37,8 @@ int num_commands_readed=0;
 int input_processed=0;
 int num_clients=0;
 int sockfd;
+
+static sigset_t signal_mask;
 
 static void displayUsage (const char* appName){
     printf("Usage: %s input_filepath output_filepath threads_number\n", appName);
@@ -85,7 +89,6 @@ char* applyCommand(char* line, int uid, fd opened_files[]){
             position=hash(name, numberBuckets);
             othersPerm=permissions % 10;
             ownerPerm=permissions / 10;
-            printf("name: %s position:%d\n", name, position);
             //verifica se ficheiro existe
             if(lookup(fs->trees[position], name)!=-1){
                 sprintf(msg, "%d", -4);
@@ -93,10 +96,8 @@ char* applyCommand(char* line, int uid, fd opened_files[]){
             }
 
             iNumber = inode_create(uid, ownerPerm, othersPerm);
-            printf("inumber:%d\n", iNumber);
             mutex_unlock(&c_command);
             create(fs->trees[position], name, iNumber);
-            printf("criei\n");
             sprintf(msg, "%d", 0);
             return msg;
             break;
@@ -113,7 +114,6 @@ char* applyCommand(char* line, int uid, fd opened_files[]){
             //verifica que nao esta aberto
             for(i=0; i<MAX_OPENED_FILES; i++)
                 if(iNumber==opened_files[i].iNumber){
-                    printf("fd:%d\n", i);
                     sprintf(msg, "%d", -9);
                     return msg;
                 }
@@ -184,7 +184,6 @@ char* applyCommand(char* line, int uid, fd opened_files[]){
                     if(opened_files[i].iNumber==-1){
                         opened_files[i].iNumber=iNumber;
                         opened_files[i].mode=mode;
-                        printf("inumber %d mode %d of fd %d \n", opened_files[i].iNumber, opened_files[i].mode,i);
                         sprintf(msg, "%d", i);
                         return msg;
                     }
@@ -215,9 +214,7 @@ char* applyCommand(char* line, int uid, fd opened_files[]){
                     len = inode_get(iNumber, &owner,  &ownerPerm,  &othersPerm, buffer, len);
                     msg=malloc(sizeof(char) *(len+1));
                     sprintf(msg, "%d ", len);
-                    printf("%s\n", buffer);
                     strcat(msg, buffer);
-                    printf("msg:%s\n", msg);
                     return msg;
                 }
                 else{
@@ -239,7 +236,6 @@ char* applyCommand(char* line, int uid, fd opened_files[]){
                     iNumber=opened_files[fd].iNumber;
                     len=strlen(buffer);
                     if(inode_set(iNumber, buffer, len)==0){
-                        printf("escrevi %s\n", buffer);
                         sprintf(msg, "%d", 0);
                         return msg;
                     }
@@ -304,11 +300,22 @@ void destroy_threads(FILE* timeFp){
 }
 
 void socket_init(){
-    int newsockfd;
+    printf("ola\n");
+    int newsockfd, s;
     socklen_t clientlen, servlen;
     struct sockaddr_un serv_addr, client_addr;
     pthread_t thread_client;
 
+    //sigemptyset(&signal_mask);
+    //sigaddset(&signal_mask, SIGINT);
+
+    /*s=pthread_sigmask(SIG_BLOCK, &signal_mask, NULL);
+    if(s!=0)
+        printf("Error in assigning the main task to the signal\n");
+    if(s==0)
+        printf("fez signal\n");*/
+
+    printf("olaola\n");
     workers = (pthread_t*) malloc(sizeof(pthread_t));
 
     if((sockfd = socket(AF_UNIX, SOCK_STREAM, 0)) <0)
@@ -343,6 +350,17 @@ void socket_init(){
     }
 }
 
+void closesocket(int socket){
+    close(socket);
+}
+
+void trata_sinal(int signal){
+    printf("entrou\n");
+    destroy_threads(stdout);
+    closesocket(sockfd);
+    exit(0);
+} 
+
 int main(int argc, char* argv[]) {
     parseArgs(argc, argv);
 
@@ -353,9 +371,9 @@ int main(int argc, char* argv[]) {
     mutex_init(&p_command);
     mutex_init(&c_command);
     inode_table_init();
+    if(signal(SIGINT, trata_sinal)==SIG_ERR)
+        printf("signal error\n");
     socket_init();
-    destroy_threads(stdout);
-
 
     print_tecnicofs_tree(outputFp, fs, numberBuckets);
     fflush(outputFp);
