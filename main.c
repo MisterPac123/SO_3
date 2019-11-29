@@ -1,5 +1,9 @@
 /* Sistemas Operativos, DEI/IST/ULisboa 2019-20 */
 
+//adicionar /0 no final de mensagens do buffer
+//adicionar /0 no final de texto guardado 
+//por funcoes de tratamento de mensagens no fs
+
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
@@ -71,7 +75,6 @@ char* applyCommand(char* line, int uid, fd opened_files[]){
     char token, name[MAX_INPUT_SIZE], newname[MAX_INPUT_SIZE];
     char *buffer;
     char *msg;
-    char *lineaux;
     token= line[0];
 
     switch (token) {
@@ -92,7 +95,6 @@ char* applyCommand(char* line, int uid, fd opened_files[]){
             iNumber = inode_create(uid, ownerPerm, othersPerm);
             printf("inumber:%d\n", iNumber);
             mutex_unlock(&c_command);
-            semaphore_post(&sem_p);
             create(fs->trees[position], name, iNumber);
             printf("criei\n");
             sprintf(msg, "%d", 0);
@@ -111,6 +113,7 @@ char* applyCommand(char* line, int uid, fd opened_files[]){
             //verifica que nao esta aberto
             for(i=0; i<MAX_OPENED_FILES; i++)
                 if(iNumber==opened_files[i].iNumber){
+                    printf("fd:%d\n", i);
                     sprintf(msg, "%d", -9);
                     return msg;
                 }
@@ -125,7 +128,6 @@ char* applyCommand(char* line, int uid, fd opened_files[]){
 
             inode_delete(iNumber);
             mutex_unlock(&c_command);
-            semaphore_post(&sem_p);
             delete(fs->trees[position], name);
             sprintf(msg, "%d", 0);
             return msg;
@@ -144,6 +146,13 @@ char* applyCommand(char* line, int uid, fd opened_files[]){
                 sprintf(msg, "%d", -5);
                 return msg;
             }
+
+            for(i=0; i<MAX_OPENED_FILES; i++)
+                if(iNumber==opened_files[i].iNumber){
+                    sprintf(msg, "%d", -9);
+                    return msg;
+                }
+
             buffer = malloc(sizeof(char)*len);
             inode_get(iNumber , &owner,  &ownerPerm,  &othersPerm, buffer, len);
             if(owner!=uid){
@@ -155,7 +164,6 @@ char* applyCommand(char* line, int uid, fd opened_files[]){
             inode_create(uid, ownerPerm, othersPerm);
 
             mutex_unlock(&c_command);
-            semaphore_post(&sem_p);
             change_name(fs->trees[position], fs->trees[position2], name, newname);
             sprintf(msg, "%d", 0);
             return msg;
@@ -176,6 +184,7 @@ char* applyCommand(char* line, int uid, fd opened_files[]){
                     if(opened_files[i].iNumber==-1){
                         opened_files[i].iNumber=iNumber;
                         opened_files[i].mode=mode;
+                        printf("inumber %d mode %d of fd %d \n", opened_files[i].iNumber, opened_files[i].mode,i);
                         sprintf(msg, "%d", i);
                         return msg;
                     }
@@ -207,7 +216,8 @@ char* applyCommand(char* line, int uid, fd opened_files[]){
                     msg=malloc(sizeof(char) *(len+1));
                     sprintf(msg, "%d ", len);
                     printf("%s\n", buffer);
-                    strcpy(msg, buffer);
+                    strcat(msg, buffer);
+                    printf("msg:%s\n", msg);
                     return msg;
                 }
                 else{
@@ -221,18 +231,15 @@ char* applyCommand(char* line, int uid, fd opened_files[]){
             return msg;
             break;
         case 'w':
-            strcpy(line, lineaux);
-            strtok(lineaux, " ");
-            strtok(lineaux, " ");
-            len=strlen(lineaux);
-            buffer=malloc(sizeof(char)*len);
-            sscanf(line, "%c %d %s", &token, &fd, buffer);
+            buffer=malloc(sizeof(char)*strlen(line));
             msg=malloc(sizeof(char));
+            sscanf(line, "%c %d %s", &token, &fd, buffer);
             if(opened_files[fd].iNumber!=-1){
                 if(opened_files[fd].mode==3 || opened_files[fd].mode==1){
                     iNumber=opened_files[fd].iNumber;
                     len=strlen(buffer);
                     if(inode_set(iNumber, buffer, len)==0){
+                        printf("escrevi %s\n", buffer);
                         sprintf(msg, "%d", 0);
                         return msg;
                     }
@@ -242,8 +249,6 @@ char* applyCommand(char* line, int uid, fd opened_files[]){
                     }
                 }
                 else{
-                   printf("mode %d\n", opened_files[fd].mode);
-
                     sprintf(msg, "%d", -10);
                     return msg;
                 }
@@ -254,7 +259,6 @@ char* applyCommand(char* line, int uid, fd opened_files[]){
 
         default: { /* error */
             mutex_unlock(&c_command);
-            semaphore_post(&sem_p);
             fprintf(stderr, "Error: commands to apply\n");
         }
     }
@@ -271,7 +275,7 @@ void *processClient(void *socket){
         opened_files[i].iNumber=-1;
         opened_files[i].mode=0;
     }
-    int ucred_size=sizeof(struct ucred);
+    socklen_t ucred_size=sizeof(struct ucred);
     struct ucred ucred;
     getsockopt(sock, SOL_SOCKET, SO_PEERCRED, &ucred, &ucred_size);    
     //ciclo que recebe e envia comados ao cliente
@@ -281,6 +285,7 @@ void *processClient(void *socket){
             printf("buffer:%s\n", buffer);
             write(sock, buffer, strlen(buffer));
             bzero(buffer, strlen(buffer));
+            bzero(client_message, strlen(client_message));
         }
         
     }
@@ -347,8 +352,6 @@ int main(int argc, char* argv[]) {
 
     mutex_init(&p_command);
     mutex_init(&c_command);
-    semaphore_init(&sem_p, MAX_COMMANDS);
-    semaphore_init(&sem_c, 0);
     inode_table_init();
     socket_init();
     destroy_threads(stdout);
@@ -360,8 +363,6 @@ int main(int argc, char* argv[]) {
 
     mutex_destroy(&p_command);
     mutex_destroy(&c_command);
-    semaphore_destroy(&sem_p);
-    semaphore_destroy(&sem_c);
     inode_table_destroy();
     free_tecnicofs(fs, numberBuckets);
     exit(EXIT_SUCCESS);
