@@ -9,11 +9,6 @@
 #define MAX_CLIENTS 10
 #define MAX_OPENED_FILES 5
 
-typedef struct fd{
-	int iNumber;
-	int mode;
-}fd;
-
 // if enabled => RWLOCK, else MUTEX
 //#define RWLOCK
 

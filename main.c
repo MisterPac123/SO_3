@@ -3,7 +3,7 @@
 //adicionar /0 no final de mensagens do buffer
 //adicionar /0 no final de texto guardado 
 //por funcoes de tratamento de mensagens no fs
-//testar funcoes
+//mutex c_command??
 
 #define _GNU_SOURCE
 #include <stdio.h>
@@ -15,7 +15,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
-#include<signal.h>
+#include <signal.h>
 
 #include "fs.h"
 #include "constants.h"
@@ -27,7 +27,7 @@
 
 char* socketname = NULL;
 char* global_outputFile = NULL;
-pthread_mutex_t p_command, c_command;
+pthread_mutex_t c_command;
 pthread_t* workers;
 tecnicofs* fs;
 TIMER_T startTime, stopTime;
@@ -38,7 +38,7 @@ int input_processed=0;
 int num_clients=0;
 int sockfd;
 
-static sigset_t signal_mask;
+sigset_t signal_mask;
 
 static void displayUsage (const char* appName){
     printf("Usage: %s input_filepath output_filepath threads_number\n", appName);
@@ -71,11 +71,9 @@ FILE * openOutputFile() {
     return fp;
 }
 
-char* applyCommand(char* line, int uid, fd opened_files[]){
+char* applyCommand(char* line, int uid, fd *opened_files){
     printf("new command %s\n", line);
-    int i, fd, position, position2, iNumber, permissions, len=0, mode;
-    uid_t owner;
-    permission othersPerm, ownerPerm; 
+    int file_d, permissions, mode, rtn, len;
     char token, name[MAX_INPUT_SIZE], newname[MAX_INPUT_SIZE];
     char *buffer;
     char *msg;
@@ -85,171 +83,53 @@ char* applyCommand(char* line, int uid, fd opened_files[]){
         case 'c':
             msg=malloc(sizeof(char));
             sscanf(line, "%c %s %d", &token, name, &permissions);
-
-            position=hash(name, numberBuckets);
-            othersPerm=permissions % 10;
-            ownerPerm=permissions / 10;
-            //verifica se ficheiro existe
-            if(lookup(fs->trees[position], name)!=-1){
-                sprintf(msg, "%d", -4);
-                return msg;
-            }
-
-            iNumber = inode_create(uid, ownerPerm, othersPerm);
             mutex_unlock(&c_command);
-            create(fs->trees[position], name, iNumber);
-            sprintf(msg, "%d", 0);
+            rtn=create(fs, name, permissions, uid);
+            sprintf(msg, "%d", rtn);
             return msg;
             break;
         case 'd':
             msg=malloc(sizeof(char));
             sscanf(line, "%c %s", &token, name);
-            position=hash(name, numberBuckets);
-            iNumber = lookup(fs->trees[position], name);
-            //verifica se ficheiro existe
-            if(iNumber==-1){
-                sprintf(msg, "%d", -5);
-                return msg;
-            }
-            //verifica que nao esta aberto
-            for(i=0; i<MAX_OPENED_FILES; i++)
-                if(iNumber==opened_files[i].iNumber){
-                    sprintf(msg, "%d", -9);
-                    return msg;
-                }
             
-            buffer = malloc(sizeof(char)*len);
-            inode_get(iNumber, &owner, &ownerPerm, &othersPerm, buffer, len);
-            //verifica se utilizador e o dono
-            if(owner!=uid){
-                sprintf(msg, "%d", -6);
-                return msg;
-            }
-
-            inode_delete(iNumber);
             mutex_unlock(&c_command);
-            delete(fs->trees[position], name);
-            sprintf(msg, "%d", 0);
+            rtn=delete(fs, name, opened_files, uid);
+            sprintf(msg, "%d", rtn);
             return msg;
             break;
         case 'r':
             msg=malloc(sizeof(char));
             sscanf(line, "%c %s %s", &token, name, newname);
-            position=hash(name, numberBuckets);
-            position2=hash(newname, numberBuckets);
-            if(lookup(fs->trees[position2], newname)!=-1){
-                sprintf(msg, "%d", -4);
-                return msg;
-            }
-            
-            if((iNumber = lookup(fs->trees[position], name))==-1){
-                sprintf(msg, "%d", -5);
-                return msg;
-            }
-
-            for(i=0; i<MAX_OPENED_FILES; i++)
-                if(iNumber==opened_files[i].iNumber){
-                    sprintf(msg, "%d", -9);
-                    return msg;
-                }
-
-            buffer = malloc(sizeof(char)*len);
-            inode_get(iNumber , &owner,  &ownerPerm,  &othersPerm, buffer, len);
-            if(owner!=uid){
-                sprintf(msg, "%d", -6);
-                return msg;
-            }
-            
-            inode_delete(iNumber);
-            inode_create(uid, ownerPerm, othersPerm);
-
             mutex_unlock(&c_command);
-            change_name(fs->trees[position], fs->trees[position2], name, newname);
-            sprintf(msg, "%d", 0);
+            rtn=change_name(fs, name, newname, opened_files, uid);
+            sprintf(msg, "%d", rtn);
             return msg;
             break;
         case 'o':
             msg=malloc(sizeof(char));
             sscanf(line, "%c %s %d", &token, name, &mode);
-            position=hash(name, numberBuckets);
-            if((iNumber = lookup(fs->trees[position], name))==-1){
-                sprintf(msg, "%d", -5);
-                return msg;
-            }
-
-            buffer = malloc(sizeof(char)*len);
-            inode_get(iNumber , &owner,  &ownerPerm,  &othersPerm, buffer, len);
-            if((owner==uid && (ownerPerm==3 || ownerPerm==mode)) || (owner!=uid &&(othersPerm==3 || ownerPerm==mode))){
-                for(i=0; i<MAX_OPENED_FILES; i++)
-                    if(opened_files[i].iNumber==-1){
-                        opened_files[i].iNumber=iNumber;
-                        opened_files[i].mode=mode;
-                        sprintf(msg, "%d", i);
-                        return msg;
-                    }
-                sprintf(msg, "%d", -7);
-                return msg;
-            }
-            sprintf(msg, "%d", -6);
+            rtn=open_file(fs, name, uid, mode, opened_files);
+            sprintf(msg, "%d", rtn);
             return msg;
             break;
         case 'x':
             msg=malloc(sizeof(char));
-            sscanf(line, "%c %d", &token, &fd);
-            if(opened_files[fd].iNumber!=-1){
-                opened_files[fd].iNumber=-1;
-                opened_files[fd].mode=0;
-                sprintf(msg, "%d", 0);
-                return msg;
-                }
-            sprintf(msg, "%d", -8);
+            sscanf(line, "%c %d", &token, &file_d);
+            rtn=close_file(fs, file_d, uid, opened_files);
+            sprintf(msg, "%d", rtn);
             return msg;
             break;
         case 'l':
-            sscanf(line, "%c %d %d", &token, &fd, &len);
-            if(opened_files[fd].iNumber!=-1){
-                if(opened_files[fd].mode==3 || opened_files[fd].mode==2){
-                    iNumber=opened_files[fd].iNumber;
-                    buffer=malloc(sizeof(char)*len);
-                    len = inode_get(iNumber, &owner,  &ownerPerm,  &othersPerm, buffer, len);
-                    msg=malloc(sizeof(char) *(len+1));
-                    sprintf(msg, "%d ", len);
-                    strcat(msg, buffer);
-                    return msg;
-                }
-                else{
-                    msg=malloc(sizeof(char));
-                    sprintf(msg, "%d", -10);
-                    return msg;
-                }
-            }
-            msg=malloc(sizeof(char));
-            sprintf(msg, "%d", -8);
+            sscanf(line, "%c %d %d", &token, &file_d, &len);
+            msg=read_file(fs, file_d, opened_files, len);
             return msg;
             break;
         case 'w':
-            buffer=malloc(sizeof(char)*strlen(line));
             msg=malloc(sizeof(char));
-            sscanf(line, "%c %d %s", &token, &fd, buffer);
-            if(opened_files[fd].iNumber!=-1){
-                if(opened_files[fd].mode==3 || opened_files[fd].mode==1){
-                    iNumber=opened_files[fd].iNumber;
-                    len=strlen(buffer);
-                    if(inode_set(iNumber, buffer, len)==0){
-                        sprintf(msg, "%d", 0);
-                        return msg;
-                    }
-                    else{
-                        sprintf(msg, "%d", -11);
-                        return msg;
-                    }
-                }
-                else{
-                    sprintf(msg, "%d", -10);
-                    return msg;
-                }
-            }
-            sprintf(msg, "%d", -8);
+            buffer=malloc(sizeof(char)*strlen(line));
+            sscanf(line, "%c %d %s", &token, &file_d, buffer);
+            rtn=write_file(fs, file_d, opened_files, buffer);
+            sprintf(msg, "%d", rtn);
             return msg;
             break;
 
@@ -278,6 +158,7 @@ void *processClient(void *socket){
     while(1){
         if(read(sock, client_message, MAX_INPUT_SIZE)>0){
             buffer=applyCommand(client_message, ucred.uid, opened_files);
+            strcat(buffer, "\0");
             printf("buffer:%s\n", buffer);
             write(sock, buffer, strlen(buffer));
             bzero(buffer, strlen(buffer));
@@ -300,22 +181,20 @@ void destroy_threads(FILE* timeFp){
 }
 
 void socket_init(){
-    printf("ola\n");
     int newsockfd, s;
     socklen_t clientlen, servlen;
     struct sockaddr_un serv_addr, client_addr;
     pthread_t thread_client;
 
-    //sigemptyset(&signal_mask);
-    //sigaddset(&signal_mask, SIGINT);
+    sigemptyset(&signal_mask);
+    sigaddset(&signal_mask, SIGINT);
 
-    /*s=pthread_sigmask(SIG_BLOCK, &signal_mask, NULL);
+    s=pthread_sigmask(SIG_UNBLOCK, &signal_mask, NULL);
     if(s!=0)
         printf("Error in assigning the main task to the signal\n");
     if(s==0)
-        printf("fez signal\n");*/
+        printf("fez signal\n");
 
-    printf("olaola\n");
     workers = (pthread_t*) malloc(sizeof(pthread_t));
 
     if((sockfd = socket(AF_UNIX, SOCK_STREAM, 0)) <0)
@@ -368,7 +247,6 @@ int main(int argc, char* argv[]) {
     fs = new_tecnicofs(numberBuckets);
     FILE * outputFp = openOutputFile();
 
-    mutex_init(&p_command);
     mutex_init(&c_command);
     inode_table_init();
     if(signal(SIGINT, trata_sinal)==SIG_ERR)
@@ -379,7 +257,6 @@ int main(int argc, char* argv[]) {
     fflush(outputFp);
     fclose(outputFp);
 
-    mutex_destroy(&p_command);
     mutex_destroy(&c_command);
     inode_table_destroy();
     free_tecnicofs(fs, numberBuckets);

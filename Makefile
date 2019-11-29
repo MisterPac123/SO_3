@@ -25,7 +25,7 @@ $(TARGETS):
 lib/bst.o: lib/bst.c lib/bst.h
 lib/hash.o: lib/hash.c lib/hash.h
 lib/inodes.o: lib/inodes.c lib/inodes.h
-fs.o: fs.c fs.h lib/bst.h
+fs.o: fs.c fs.h lib/bst.h 
 sync.o: sync.c sync.h constants.h
 
 ### RWLOCK ###
@@ -34,7 +34,7 @@ lib/bst-rwlock.o: lib/bst.c lib/bst.h
 lib/hash.o: lib/hash.c lib/hash.h
 
 fs-rwlock.o: CFLAGS+=-DRWLOCK
-fs-rwlock.o: fs.c fs.h lib/bst.h
+fs-rwlock.o: fs.c fs.h lib/bst.h 
 
 sync-rwlock.o: CFLAGS+=-DRWLOCK
 sync-rwlock.o: sync.c sync.h constants.h

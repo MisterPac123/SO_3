@@ -4,6 +4,7 @@
 #define FS_H
 #include "lib/bst.h"
 #include "sync.h"
+#include "constants.h"
 
 typedef struct bucket{
 	node *bstRoot;
@@ -15,14 +16,23 @@ typedef struct tecnicofs {
     bucket **trees;
 } tecnicofs;
 
+typedef struct fd{
+	int iNumber;
+	int mode;
+}fd;
+
 int obtainNewInumber(bucket* bst);
 tecnicofs* new_tecnicofs(int numbuckets);
 bucket *new_bucket(tecnicofs* fs, int i);
 void free_tecnicofs(tecnicofs* fs, int numbuckets);
-void create(bucket* bckt, char *name, int inumber);
-void delete(bucket* bckt, char *name);
+int create(tecnicofs* fs, char *name, int permissions, int uid);
+int delete(tecnicofs* fs, char *name, fd* opened_files, int uid);
 int lookup(bucket* bckt, char *name);
-void change_name(bucket* bckt1, bucket* bckt2, char *name, char *newName);
+int change_name(tecnicofs* fs, char *name, char *newName, fd* opened_files, int uid);
+int open_file(tecnicofs* fs, char* name, int uid, int mode, fd* opened_files);
+int close_file(tecnicofs* fs, int filed, int uid, fd* opened_files);
+char* read_file(tecnicofs* fs, int file_d, fd *opened_files, int len);
+int write_file(tecnicofs* fs, int file_d, fd *opened_files, char* buffer);
 void print_tecnicofs_tree(FILE * fp, tecnicofs *fs, int numbuckets);
 
 #endif /* FS_H */
