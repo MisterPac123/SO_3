@@ -1,5 +1,6 @@
 /* Sistemas Operativos, DEI/IST/ULisboa 2019-20 */
 
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +16,7 @@
 #include "sync.h"
 #include "lib/hash.h"
 #include "lib/inodes.h"
+#include "getopt.h"
 
 char* socketname = NULL;
 char* global_outputFile = NULL;
@@ -61,27 +63,30 @@ FILE * openOutputFile() {
     return fp;
 }
 
-int applyCommand(char* line, int uid, int opened_files[]){
+char* applyCommand(char* line, int uid, fd opened_files[]){
     printf("new command %s\n", line);
     int i, fd, position, position2, iNumber, permissions, len=0, mode;
     uid_t owner;
     permission othersPerm, ownerPerm; 
     char token, name[MAX_INPUT_SIZE], newname[MAX_INPUT_SIZE];
     char *buffer;
+    char *msg;
+    char *lineaux;
     token= line[0];
 
     switch (token) {
         case 'c':
+            msg=malloc(sizeof(char));
             sscanf(line, "%c %s %d", &token, name, &permissions);
 
             position=hash(name, numberBuckets);
             othersPerm=permissions % 10;
             ownerPerm=permissions / 10;
             printf("name: %s position:%d\n", name, position);
-            int a=lookup(fs->trees[position], name);
-            printf("%d\n", a);
-            if(a!=-1){
-                return -4;
+            //verifica se ficheiro existe
+            if(lookup(fs->trees[position], name)!=-1){
+                sprintf(msg, "%d", -4);
+                return msg;
             }
 
             iNumber = inode_create(uid, ownerPerm, othersPerm);
@@ -90,36 +95,61 @@ int applyCommand(char* line, int uid, int opened_files[]){
             semaphore_post(&sem_p);
             create(fs->trees[position], name, iNumber);
             printf("criei\n");
+            sprintf(msg, "%d", 0);
+            return msg;
             break;
         case 'd':
+            msg=malloc(sizeof(char));
             sscanf(line, "%c %s", &token, name);
             position=hash(name, numberBuckets);
             iNumber = lookup(fs->trees[position], name);
-            if(iNumber==0)
-                return -5;
+            //verifica se ficheiro existe
+            if(iNumber==-1){
+                sprintf(msg, "%d", -5);
+                return msg;
+            }
+            //verifica que nao esta aberto
+            for(i=0; i<MAX_OPENED_FILES; i++)
+                if(iNumber==opened_files[i].iNumber){
+                    sprintf(msg, "%d", -9);
+                    return msg;
+                }
+            
             buffer = malloc(sizeof(char)*len);
             inode_get(iNumber, &owner, &ownerPerm, &othersPerm, buffer, len);
-            if(owner!=uid)
-                return -6;
+            //verifica se utilizador e o dono
+            if(owner!=uid){
+                sprintf(msg, "%d", -6);
+                return msg;
+            }
 
             inode_delete(iNumber);
             mutex_unlock(&c_command);
             semaphore_post(&sem_p);
             delete(fs->trees[position], name);
+            sprintf(msg, "%d", 0);
+            return msg;
             break;
         case 'r':
+            msg=malloc(sizeof(char));
             sscanf(line, "%c %s %s", &token, name, newname);
             position=hash(name, numberBuckets);
             position2=hash(newname, numberBuckets);
-            if(lookup(fs->trees[position2], newname)!=0)
-                return -4;
+            if(lookup(fs->trees[position2], newname)!=-1){
+                sprintf(msg, "%d", -4);
+                return msg;
+            }
             
-            if((iNumber = lookup(fs->trees[position], name))==0)
-                return -5;
+            if((iNumber = lookup(fs->trees[position], name))==-1){
+                sprintf(msg, "%d", -5);
+                return msg;
+            }
             buffer = malloc(sizeof(char)*len);
             inode_get(iNumber , &owner,  &ownerPerm,  &othersPerm, buffer, len);
-            if(owner!=uid)
-                return -6;
+            if(owner!=uid){
+                sprintf(msg, "%d", -6);
+                return msg;
+            }
             
             inode_delete(iNumber);
             inode_create(uid, ownerPerm, othersPerm);
@@ -127,44 +157,100 @@ int applyCommand(char* line, int uid, int opened_files[]){
             mutex_unlock(&c_command);
             semaphore_post(&sem_p);
             change_name(fs->trees[position], fs->trees[position2], name, newname);
+            sprintf(msg, "%d", 0);
+            return msg;
             break;
         case 'o':
+            msg=malloc(sizeof(char));
             sscanf(line, "%c %s %d", &token, name, &mode);
             position=hash(name, numberBuckets);
-            if((iNumber = lookup(fs->trees[position], name))==0)
-                return -5;
+            if((iNumber = lookup(fs->trees[position], name))==-1){
+                sprintf(msg, "%d", -5);
+                return msg;
+            }
 
             buffer = malloc(sizeof(char)*len);
             inode_get(iNumber , &owner,  &ownerPerm,  &othersPerm, buffer, len);
             if((owner==uid && (ownerPerm==3 || ownerPerm==mode)) || (owner!=uid &&(othersPerm==3 || ownerPerm==mode))){
                 for(i=0; i<MAX_OPENED_FILES; i++)
-                    if(opened_files[i]==-1){
-                        opened_files[i]=iNumber;
-                        return iNumber;
+                    if(opened_files[i].iNumber==-1){
+                        opened_files[i].iNumber=iNumber;
+                        opened_files[i].mode=mode;
+                        sprintf(msg, "%d", i);
+                        return msg;
                     }
-                return -7;
+                sprintf(msg, "%d", -7);
+                return msg;
             }
-            return -6;
+            sprintf(msg, "%d", -6);
+            return msg;
             break;
         case 'x':
+            msg=malloc(sizeof(char));
             sscanf(line, "%c %d", &token, &fd);
-            for(i=0; i<MAX_OPENED_FILES; i++)
-                if(opened_files[i]==fd){
-                    opened_files[i]=-1;
-                    return 0;
+            if(opened_files[fd].iNumber!=-1){
+                opened_files[fd].iNumber=-1;
+                opened_files[fd].mode=0;
+                sprintf(msg, "%d", 0);
+                return msg;
                 }
-            return -8;
+            sprintf(msg, "%d", -8);
+            return msg;
             break;
         case 'l':
             sscanf(line, "%c %d %d", &token, &fd, &len);
-            //verificações
-            //return inode_get(iNumber, &owner,  &ownerPerm,  &othersPerm, buffer, len);
+            if(opened_files[fd].iNumber!=-1){
+                if(opened_files[fd].mode==3 || opened_files[fd].mode==2){
+                    iNumber=opened_files[fd].iNumber;
+                    buffer=malloc(sizeof(char)*len);
+                    len = inode_get(iNumber, &owner,  &ownerPerm,  &othersPerm, buffer, len);
+                    msg=malloc(sizeof(char) *(len+1));
+                    sprintf(msg, "%d ", len);
+                    printf("%s\n", buffer);
+                    strcpy(msg, buffer);
+                    return msg;
+                }
+                else{
+                    msg=malloc(sizeof(char));
+                    sprintf(msg, "%d", -10);
+                    return msg;
+                }
+            }
+            msg=malloc(sizeof(char));
+            sprintf(msg, "%d", -8);
+            return msg;
             break;
         case 'w':
-            //verificar permiçoes -6
-            sscanf(line, "%c %d %d", &token, &fd, &len);
+            strcpy(line, lineaux);
+            strtok(lineaux, " ");
+            strtok(lineaux, " ");
+            len=strlen(lineaux);
+            buffer=malloc(sizeof(char)*len);
+            sscanf(line, "%c %d %s", &token, &fd, buffer);
+            msg=malloc(sizeof(char));
+            if(opened_files[fd].iNumber!=-1){
+                if(opened_files[fd].mode==3 || opened_files[fd].mode==1){
+                    iNumber=opened_files[fd].iNumber;
+                    len=strlen(buffer);
+                    if(inode_set(iNumber, buffer, len)==0){
+                        sprintf(msg, "%d", 0);
+                        return msg;
+                    }
+                    else{
+                        sprintf(msg, "%d", -11);
+                        return msg;
+                    }
+                }
+                else{
+                   printf("mode %d\n", opened_files[fd].mode);
 
-            //inode_set(iNumber, &owner, &ownerPerm, &othersPerm, buffer, len);
+                    sprintf(msg, "%d", -10);
+                    return msg;
+                }
+            }
+            sprintf(msg, "%d", -8);
+            return msg;
+            break;
 
         default: { /* error */
             mutex_unlock(&c_command);
@@ -177,20 +263,21 @@ int applyCommand(char* line, int uid, int opened_files[]){
 
 void *processClient(void *socket){
     printf("new socket created\n");
-    int opened_files[MAX_OPENED_FILES], rtn_apply_command;
+    fd opened_files[MAX_OPENED_FILES];
     int sock = *(int*)socket;
     char *buffer, client_message[MAX_INPUT_SIZE];
     //inicializacao de array de fds
-    for(int i=0; i<MAX_OPENED_FILES; i++)
-        opened_files[i]=-1;
-    //struct ucred ucred;
-    //getsockopt(sock, SOL_SOCKET, SO_PEERCRED, &ucred, &sizeof(struct ucred));    
+    for(int i=0; i<MAX_OPENED_FILES; i++){
+        opened_files[i].iNumber=-1;
+        opened_files[i].mode=0;
+    }
+    int ucred_size=sizeof(struct ucred);
+    struct ucred ucred;
+    getsockopt(sock, SOL_SOCKET, SO_PEERCRED, &ucred, &ucred_size);    
     //ciclo que recebe e envia comados ao cliente
     while(1){
         if(read(sock, client_message, MAX_INPUT_SIZE)>0){
-            rtn_apply_command=applyCommand(client_message, /*ucred.uid*/1, opened_files);
-            buffer=malloc(sizeof(rtn_apply_command)+1);
-            sprintf(buffer, "%d", rtn_apply_command);
+            buffer=applyCommand(client_message, ucred.uid, opened_files);
             printf("buffer:%s\n", buffer);
             write(sock, buffer, strlen(buffer));
             bzero(buffer, strlen(buffer));

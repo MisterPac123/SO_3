@@ -8,7 +8,11 @@
 #define DELAY 5000
 #define MAX_CLIENTS 10
 #define MAX_OPENED_FILES 5
-#define _GNU_SOURCE
+
+typedef struct fd{
+	int iNumber;
+	int mode;
+}fd;
 
 // if enabled => RWLOCK, else MUTEX
 //#define RWLOCK

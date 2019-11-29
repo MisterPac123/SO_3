@@ -72,6 +72,8 @@ int tfsCreate(char *filename, permission ownerPermissions, permission othersPerm
 
 	strcat(msg,permissions);
 	tam_msg = strlen(msg);
+			printf("msg:%s\n", msg);
+
 	if (write(sock,msg,tam_msg) < 0)
 		perror("client: write error on socket");
 
@@ -95,6 +97,8 @@ int tfsDelete(char *filename){
 	strcat(msg,filename);
 	
 	tam_msg = strlen(msg);
+		printf("msg:%s\n", msg);
+
 	if (write(sock,msg,tam_msg) < 0)
 		perror("client: write error on socket");
 
@@ -103,11 +107,13 @@ int tfsDelete(char *filename){
 	tam_msg = read(sock,msg,MAX_INPUT_SIZE+1);
 	if(tam_msg<0)
 		perror("client: read error on socket");
-
+	printf("return %s\n", msg);
 	if(strcmp(msg,"-5")==0)
 		return TECNICOFS_ERROR_FILE_NOT_FOUND;
 	if(strcmp(msg,"-6")==0)
 		return TECNICOFS_ERROR_PERMISSION_DENIED;
+	if(strcmp(msg,"-9")==0)
+		return TECNICOFS_ERROR_FILE_IS_OPEN;
 
 	return 0;
 }
@@ -123,6 +129,8 @@ int tfsRename(char *filenameOld, char *filenameNew){
 	strcat(msg,filenameNew);
 	
 	tam_msg = strlen(msg);
+			printf("msg:%s\n", msg);
+
 	if (write(sock,msg,tam_msg) < 0)
 		perror("client: write error on socket");
 
@@ -146,21 +154,21 @@ int tfsRename(char *filenameOld, char *filenameNew){
 int tfsOpen(char *filename, permission mode){
 	int tam_msg, fd;
 	char msg[MAX_INPUT_SIZE] = "o ";
-	char delim[1] = " ";
 
 	strcat(msg,filename);
-	strcat(msg,delim);
 
 	if (mode == NONE)
-		strcat(msg,"0");
-	if (mode == WRITE)
-		strcat(msg,"1");
-	if (mode == READ)
-		strcat(msg,"2");
-	if (mode == RW)
-		strcat(msg,"3");
+		strcat(msg," 0");
+	else if (mode == WRITE)
+		strcat(msg," 1");
+	else if (mode == READ)
+		strcat(msg," 2");
+	else if (mode == RW)
+		strcat(msg," 3");
 
 	tam_msg = strlen(msg);
+	printf("msg:%s\n", msg);
+
 	if (write(sock,msg,tam_msg) < 0)
 		perror("client: write error on socket");
 
@@ -172,9 +180,9 @@ int tfsOpen(char *filename, permission mode){
 
 	if(strcmp(msg,"-5")==0)
 		return TECNICOFS_ERROR_FILE_NOT_FOUND;
-	if(strcmp(msg,"-6")==0)
+	else if(strcmp(msg,"-6")==0)
 		return TECNICOFS_ERROR_PERMISSION_DENIED;
-	if(strcmp(msg,"-7")==0)
+	else if(strcmp(msg,"-7")==0)
 		return TECNICOFS_ERROR_MAXED_OPEN_FILES;
 
 	fd=atoi(msg);
@@ -192,6 +200,8 @@ int tfsClose(int fd){
 	strcat(msg, fd2);
 	
 	tam_msg = strlen(msg);
+			printf("msg:%s\n", msg);
+
 	if (write(sock,msg,tam_msg) < 0)
 		perror("client: write error on socket");
 
@@ -221,6 +231,8 @@ int tfsRead(int fd, char *buffer, int len){
 	strcat(msg,len2);
 
 	tam_msg = strlen(msg);
+			printf("msg:%s\n", msg);
+
 	if (write(sock,msg,tam_msg) < 0)
 		perror("client: write error on socket");
 	bzero(msg, sizeof(msg));
@@ -255,6 +267,8 @@ int tfsWrite(int fd, char *buffer, int len){
 
 
 	tam_msg = strlen(msg);
+			printf("msg:%s\n", msg);
+
 	if (write(sock,msg,tam_msg) < 0)
 		perror("client: write error on socket");
 
